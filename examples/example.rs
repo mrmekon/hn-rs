@@ -10,14 +10,15 @@ fn main() {
     let ui_thread = thread::spawn(move || {
         let hn = ui_hn;
         loop {
-            {
-                let reader = hn.cache.read().unwrap();
-                println!("items: {}", (*reader).len());
-                for item in reader.iter() {
-                    println!("item: {:?}", item);
-                }
+            println!("Refresh:");
+            for item in hn.into_iter() {
+                println!("item: {}", item.title());
             }
-            thread::sleep(Duration::from_millis(1000));
+            if let Some(ref item) = hn.into_iter().nth(0) {
+                hn.hide(item);
+            }
+            println!("");
+            thread::sleep(Duration::from_millis(10000));
         }
     });
 

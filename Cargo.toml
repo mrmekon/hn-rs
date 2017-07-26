@@ -2,6 +2,13 @@
 name = "hn"
 version = "0.1.0"
 authors = ["Trevor Bentley <mrmekon@gmail.com>"]
+description = "Rust wrapper for the Hacker News (YCombinator) API"
+keywords = ["hackernews", "news", "api"]
+categories = ["api-bindings"]
+homepage = "https://github.com/mrmekon/hn-rs"
+repository = "https://github.com/mrmekon/hn-rs"
+documentation = "https://mrmekon.github.io/hn-rs/hn/"
+license = "Apache-2.0"
 
 [dependencies]
 hyper = "0.11.1"
@@ -11,3 +18,12 @@ hyper-tls = "0.1.2"
 serde = "1.0.10"
 serde_json = "1.0.2"
 serde_derive = "1.0.10"
+time = "0.1"
+
+[package.metadata.release]
+sign-commit = false
+upload-doc = true
+pre-release-commit-message = "Release {{version}}"
+dev-version-ext = "rc"
+tag-message = "Release {{version}}"
+doc-commit-message = "Release {{version}}"
