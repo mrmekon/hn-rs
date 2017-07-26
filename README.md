@@ -13,3 +13,6 @@ News items can be marked as 'hidden' so they are not returned in future passes t
 
 See the `examples/` dir for usage.
 
+## Documentation
+
+[API documentation](https://mrmekon.github.io/hn-rs/hn/)
