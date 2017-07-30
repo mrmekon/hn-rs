@@ -25,6 +25,7 @@ extern crate serde_json;
 extern crate serde_derive;
 
 use futures::future::Future;
+use futures::future::Either;
 use futures::stream::Stream;
 
 use std::str::FromStr;
@@ -50,16 +51,20 @@ const HN_URL_DISCUSSION: &'static str = "https://news.ycombinator.com/item?id=";
 #[derive(Deserialize, Debug, Clone)]
 pub struct Item {
     by: String,
-    descendants: Option<u32>,
+    descendants: Option<u64>,
     id: u64,
-    kids: Option<Vec<u32>>,
-    score: u32,
+    kids: Option<Vec<u64>>,
+    score: Option<u32>,
     time: u64,
-    title: String,
+    title: Option<String>,
+    text: Option<String>,
     #[serde(rename(deserialize = "type"))]
     item_type: String,
     url: Option<String>,
 
+    //
+    // INTERNAL.  Not deserialized from HN JSON
+    //
     #[serde(default)]
     seen: bool,
     #[serde(default)]
@@ -69,7 +74,7 @@ pub struct Item {
 impl Item {
     /// Return the title of the news item
     pub fn title(&self) -> String {
-        self.title.clone()
+        self.title.clone().unwrap_or("".to_string())
     }
     /// Return the URL of the news item.
     ///
@@ -210,9 +215,10 @@ impl HackerNews {
         let mut last_update_time = 0;
         loop {
             let now = time::now_utc().to_timespec().sec as i64;
-            if now > last_update_time + 60 {
-                HackerNews::update_top_stories(&mut core, &client, &hn.top);
-                HackerNews::update_item_cache(&client, &handle, &hn.top, &hn.cache);
+            if now > last_update_time + 10 {
+                if HackerNews::update_top_stories(&mut core, &client, &hn.top).is_ok() {
+                    HackerNews::update_item_cache(&client, &handle, &hn.top, &hn.cache);
+                }
                 last_update_time = now;
             }
             core.turn(Some(Duration::from_millis(100)));
@@ -220,19 +226,37 @@ impl HackerNews {
     }
     fn update_top_stories(core: &mut Core,
                           client: &Client<HttpsConnector<HttpConnector>>,
-                          top: &RwLock<Vec<u64>>)  {
+                          top: &RwLock<Vec<u64>>) -> Result<(), hyper::error::Error> {
+        let handle = core.handle();
         let uri = Uri::from_str(HN_URL_TOP_STORIES).ok().unwrap();
         let request = client.get(uri).and_then(|res| {
             res.body().concat2()
         });
-        let got = core.run(request).unwrap();
+
+        let timeout = tokio_core::reactor::Timeout::new(Duration::from_millis(5000), &handle).unwrap();
+        let timed_request = request.select2(timeout).then(|res| match res {
+            Ok(Either::A((data, _timeout))) => Ok(data),
+            Ok(Either::B((_timeout_error, _get))) => {
+                Err(hyper::Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Timed out requesting top list",
+                )))
+            }
+            Err(Either::A((error, _timeout))) => Err(error),
+            Err(Either::B((timeout_error, _get))) => Err(From::from(timeout_error)),
+        });
+
+        let got = core.run(timed_request)?;
         let top_stories_str = std::str::from_utf8(&got).unwrap();
         {
             let mut writer = top.write().unwrap();
-            let mut top_stories: Vec<u64> = serde_json::from_str(top_stories_str).unwrap();
-            top_stories.truncate(60);
-            *writer = top_stories;;
+            let top_stories: Result<Vec<u64>,_> = serde_json::from_str(top_stories_str);
+            if let Ok(mut top_stories) = top_stories {
+                top_stories.truncate(60);
+                *writer = top_stories;
+            }
         }
+        Ok(())
     }
     fn update_item_cache(client: &Client<HttpsConnector<HttpConnector>>,
                          handle: &Handle,
@@ -256,15 +280,22 @@ impl HackerNews {
             let req = client.get(uri).and_then(|res| {
                 res.body().concat2()
             }).then(move |body| {
+                if body.is_err() {
+                    return Err(());
+                }
                 let body = body.unwrap();
                 let item_str = std::str::from_utf8(&body).unwrap();
-                let item: Item = serde_json::from_str(item_str).unwrap();
-                {
+                let item: Result<Item,_> = serde_json::from_str(item_str);
+                if let Ok(item) = item {
                     let mut writer = future_cache.write().unwrap();
                     (*writer).insert(id, item);
                 }
-                Ok(())});
-            handle.spawn(req);
+                Ok(())
+            });
+
+            let timeout = tokio_core::reactor::Timeout::new(Duration::from_millis(5000), &handle).unwrap();
+            let timed_request = req.select2(timeout).then(|_| { Ok(()) });
+            handle.spawn(timed_request);
             req_count += 1;
         }
     }
