@@ -168,9 +168,9 @@ impl<'a> Iterator for HackerNewsIterator<'a> {
         let reader = self.hn.top.read().unwrap();
         while self.idx < reader.len() {
             let item: Option<&u64> = (*reader).get(self.idx);
+            self.idx += 1;
             if let Some(item) = item {
                 if let Some(item) = self.hn.cache.write().unwrap().get_mut(item) {
-                    self.idx += 1;
                     if !item.hidden {
                         item.seen = true;
                         return Some((*item).clone());
